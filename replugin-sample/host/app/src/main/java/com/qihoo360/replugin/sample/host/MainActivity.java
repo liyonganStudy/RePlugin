@@ -51,7 +51,6 @@ public class MainActivity extends Activity {
                 RePlugin.startActivity(MainActivity.this, RePlugin.createIntent("com.qihoo360.replugin.sample.demo1", "com.qihoo360.replugin.sample.demo1.MainActivity"));
             }
         });
-
         findViewById(R.id.btn_start_plugin_for_result).setOnClickListener(new View.OnClickListener() {
             @Override
             public void onClick(View v) {
