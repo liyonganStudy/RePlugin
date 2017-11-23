@@ -20,15 +20,15 @@ package com.qihoo360.replugin.gradle.plugin.inner
 import com.android.build.api.transform.*
 import com.android.build.gradle.AppPlugin
 import com.android.build.gradle.BasePlugin
-import com.android.build.gradle.internal.TaskManager
 import com.android.build.gradle.internal.pipeline.TransformManager
-import com.android.build.gradle.internal.scope.GlobalScope
 import com.qihoo360.replugin.gradle.plugin.injector.IClassInjector
 import com.qihoo360.replugin.gradle.plugin.injector.Injectors
 import javassist.ClassPool
 import org.apache.commons.codec.digest.DigestUtils
 import org.apache.commons.io.FileUtils
+import org.gradle.api.GradleException
 import org.gradle.api.Project
+import java.util.regex.Pattern
 
 /**
  * @author RePlugin Team
@@ -36,18 +36,18 @@ import org.gradle.api.Project
 public class ReClassTransform extends Transform {
 
     private Project project
-    private GlobalScope globalScope
+    private def globalScope
 
     /* 需要处理的 jar 包 */
     def includeJars = [] as Set
+    def map = [:]
 
     public ReClassTransform(Project p) {
         this.project = p
-        AppPlugin appPlugin = project.plugins.getPlugin(AppPlugin)
-
+        def appPlugin = project.plugins.getPlugin(AppPlugin)
         // taskManager 在 2.1.3 中为 protected 访问类型的，在之后的版本为 private 访问类型的，
         // 使用反射访问
-        TaskManager taskManager = BasePlugin.metaClass.getProperty(appPlugin, "taskManager")
+        def taskManager = BasePlugin.metaClass.getProperty(appPlugin, "taskManager")
         this.globalScope = taskManager.globalScope;
     }
 
@@ -68,12 +68,20 @@ public class ReClassTransform extends Transform {
         /* 读取用户配置 */
         def config = project.extensions.getByName('repluginPluginConfig')
 
-        File rootLocation = outputProvider.rootLocation
-        // Windows 系统路径分隔符为 \，split 函数参数为正则表达式，而 \ 在正则表达式中为转义字符，
-        // 所以不能直接使用 （getName()+File.separatorChar），为了方便直接使用 name 分割过滤掉
-        // 第一个路径分割字符
-        def variantDir = rootLocation.absolutePath.split(getName())[1].substring(1)
 
+        File rootLocation = null
+        try {
+            rootLocation = outputProvider.rootLocation
+        } catch (Throwable e) {
+            //android gradle plugin 3.0.0+ 修改了私有变量，将其移动到了IntermediateFolderUtils中去
+            rootLocation = outputProvider.folderUtils.getRootFolder()
+        }
+        if (rootLocation == null) {
+            throw new GradleException("can't get transform root location")
+        }
+        println ">>> rootLocation: ${rootLocation}"
+        // Compatible with path separators for window and Linux, and fit split param based on 'Pattern.quote'
+        def variantDir = rootLocation.absolutePath.split(getName() + Pattern.quote(File.separator))[1]
         println ">>> variantDir: ${variantDir}"
 
         CommonData.appModule = config.appModule
@@ -166,13 +174,14 @@ public class ReClassTransform extends Transform {
         println '>>> Repackage...'
         includeJars.each {
             File jar = new File(it)
-            String dir = jar.getParent() + '/' + jar.getName().replace('.jar', '')
+            String JarAfterzip = map.get(jar.getParent() + File.separatorChar + jar.getName())
+            String dirAfterUnzip = JarAfterzip.replace('.jar', '')
+            // println ">>> 压缩目录 $dirAfterUnzip"
+            
+            Util.zipDir(dirAfterUnzip, JarAfterzip)
 
-            // println ">>> 压缩目录 $dir"
-            Util.zipDir(dir, jar.absolutePath)
-
-            // println ">>> 删除目录 $dir"
-            FileUtils.deleteDirectory(new File(dir))
+            // println ">>> 删除目录 $dirAfterUnzip"
+            FileUtils.deleteDirectory(new File(dirAfterUnzip))
         }
     }
 
@@ -202,7 +211,7 @@ public class ReClassTransform extends Transform {
         Util.newSection()
         def pool = new ClassPool(true)
         // 添加编译时需要引用的到类到 ClassPool, 同时记录要修改的 jar 到 includeJars
-        Util.getClassPaths(project, globalScope, inputs, includeJars).each {
+        Util.getClassPaths(project, globalScope, inputs, includeJars, map).each {
             println "    $it"
             pool.insertClassPath(it)
         }
@@ -216,7 +225,7 @@ public class ReClassTransform extends Transform {
         File jar = input.file
         if (jar.absolutePath in includeJars) {
             println ">>> Handle Jar: ${jar.absolutePath}"
-            String dirAfterUnzip = jar.getParent() + File.separatorChar + jar.getName().replace('.jar', '')
+            String dirAfterUnzip = map.get(jar.getParent() + File.separatorChar + jar.getName()).replace('.jar', '')
             injector.injectClass(pool, dirAfterUnzip, config)
         }
     }
@@ -226,6 +235,10 @@ public class ReClassTransform extends Transform {
      */
     def copyJar(TransformOutputProvider output, JarInput input) {
         File jar = input.file
+        String jarPath = map.get(jar.absolutePath);
+        if (jarPath != null) {
+            jar = new File(jarPath)
+        }
 
         String destName = input.name
         def hexName = DigestUtils.md5Hex(jar.absolutePath)
@@ -233,7 +246,7 @@ public class ReClassTransform extends Transform {
             destName = destName.substring(0, destName.length() - 4)
         }
         File dest = output.getContentLocation(destName + '_' + hexName, input.contentTypes, input.scopes, Format.JAR)
-        FileUtils.copyFile(input.file, dest)
+        FileUtils.copyFile(jar, dest)
 
 /*
         def path = jar.absolutePath
