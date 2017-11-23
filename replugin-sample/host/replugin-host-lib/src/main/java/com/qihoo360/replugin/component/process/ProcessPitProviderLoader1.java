@@ -14,4 +14,11 @@
  * the License.
  */
 
-include ':app', ':utils', ':replugin-host-lib'
+package com.qihoo360.replugin.component.process;
+
+/**
+ * @author RePlugin Team
+ */
+public class ProcessPitProviderLoader1 extends ProcessPitProviderBase {
+
+}
