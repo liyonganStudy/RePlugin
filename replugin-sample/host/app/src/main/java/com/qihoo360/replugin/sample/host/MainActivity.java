@@ -36,10 +36,6 @@ public class MainActivity extends Activity {
             @Override
             public void onClick(View v) {
                 RePlugin.startActivity(MainActivity.this, RePlugin.createIntent("demo1", "com.qihoo360.replugin.sample.demo1.MainActivity"));
-
-
-
-
             }
         });
     }
